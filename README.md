@@ -10,6 +10,7 @@ The Album Select integration for Home Assistant allows you to randomly select ph
 - Updates at configurable intervals
 - Provides album metadata including year, month, name, and URI
 - Works with albums that follow the naming pattern: `YYYY-MM-AlbumName` or `YYYY_MM_AlbumName`
+- Includes a service to manually select a new album on demand
 
 ## Installation
 
@@ -53,6 +54,17 @@ album_select:
 ## Usage
 
 Once configured, the integration will create a sensor entity called `sensor.album_select` which will randomly select an album at the specified interval.
+
+### Services
+
+The integration provides the following service:
+
+- `album_select.select_next_album`: Selects a new random album immediately, without waiting for the next interval
+
+Example service call:
+```yaml
+service: album_select.select_next_album
+```
 
 ### Sensor Attributes
 
