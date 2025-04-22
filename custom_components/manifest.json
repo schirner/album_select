@@ -1,9 +1,0 @@
-{
-    "domain": "album_select",
-    "name": "Random Album Selector",
-    "version": "1.0.0",
-    "documentation": "https://your-docs-url",
-    "requirements": [],
-    "dependencies": [],
-    "codeowners": ["@your-github-username"]
-  }
