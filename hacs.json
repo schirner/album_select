@@ -1,0 +1,9 @@
+{
+  "name": "Album Select",
+  "render_readme": true,
+  "domain": "album_select",
+  "documentation": "https://github.com/your-username/album_select",
+  "issue_tracker": "https://github.com/your-username/album_select/issues",
+  "content_in_root": false,
+  "persistent_directory": null
+}
