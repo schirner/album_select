@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.discovery import async_load_platform
 
 DOMAIN = "album_select"
 PLATFORMS = [Platform.SENSOR]
@@ -16,7 +17,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         # Forward the configuration to the sensor platform
         hass.data.setdefault(DOMAIN, {})
         hass.data[DOMAIN]["config"] = config[DOMAIN]
-        await hass.helpers.discovery.async_load_platform("sensor", DOMAIN, {}, config)
+        await async_load_platform(hass, "sensor", DOMAIN, {}, config)
 
     return True
 
