@@ -145,13 +145,12 @@ class AlbumSelectSensor(SensorEntity):
                     uri = local_path.replace(self._media_prefix, self._uri_prefix, 1)
                 else:
                     uri = local_path  # fallback, no replacement
-                self._state = folder
+                self._state = uri
                 self._attrs = {
                     "year": year,
                     "month": month,
                     "name": name,
-                    "uri": uri,
-                    "path": local_path,
+                    "folder": folder,
                 }
         except (FileNotFoundError, PermissionError) as ex:
             self._state = None
