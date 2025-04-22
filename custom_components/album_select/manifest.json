@@ -1,11 +1,11 @@
 {
   "domain": "album_select",
   "name": "Album Select",
-  "codeowners": ["@your-github-username"],
+  "codeowners": ["@schirner"],
   "dependencies": [],
-  "documentation": "https://github.com/your-username/album_select",
+  "documentation": "https://github.com/schirner/album_select",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/your-username/album_select/issues",
+  "issue_tracker": "https://github.com/schirner/album_select/issues",
   "requirements": [],
-  "version": "1.0.0"
+  "version": "0.0.1"
 }
