@@ -2,10 +2,12 @@
   "domain": "album_select",
   "name": "Album Select",
   "codeowners": ["@schirner"],
-  "dependencies": [],
+  "dependencies": ["media_source"],
+  "after_dependencies": ["immich"],
   "documentation": "https://github.com/schirner/album_select",
+  "integration_type": "service",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/schirner/album_select/issues",
   "requirements": [],
-  "version": "0.0.2"
+  "version": "0.1.0"
 }
