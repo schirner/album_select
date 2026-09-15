@@ -2,50 +2,36 @@
 
 from __future__ import annotations
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+import voluptuous as vol
+
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.discovery import async_load_platform
+from homeassistant.helpers.typing import ConfigType
 
-DOMAIN = "album_select"
-PLATFORMS = [Platform.SENSOR]
+from .const import BASE_SCHEMA, DOMAIN, SERVICE_SELECT_NEXT_ALBUM
+
+# Must live in the component module: homeassistant.config only validates
+# CONFIG_SCHEMA found on the integration's top-level module.
+CONFIG_SCHEMA = vol.Schema({DOMAIN: vol.Schema(BASE_SCHEMA)}, extra=vol.ALLOW_EXTRA)
+
+DATA_CONFIG = "config"
+DATA_ENTITIES = "entities"
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the album_select integration from YAML."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    domain_data.setdefault(DATA_ENTITIES, [])
+
     if DOMAIN in config:
-        # Forward the configuration to the sensor platform
-        hass.data.setdefault(DOMAIN, {})
-        hass.data[DOMAIN]["config"] = config[DOMAIN]
+        domain_data[DATA_CONFIG] = config[DOMAIN]
         await async_load_platform(hass, "sensor", DOMAIN, {}, config)
 
-    # Register the select_album service
-    async def select_new_album(call: ServiceCall) -> None:
-        """Service to select a new album."""
-        # Find the sensor entity
-        entity_id = f"sensor.{DOMAIN}"
-        entity = hass.states.get(entity_id)
-        
-        if entity is None:
-            return
-            
-        # Get the sensor object to call its update method
-        for component in hass.data.get("sensor", {}).get("entities", []):
-            if component.entity_id == entity_id and hasattr(component, "async_update_album"):
-                await component.async_update_album()
-                break
+    async def select_next_album(call: ServiceCall) -> None:
+        """Select a new album immediately."""
+        for entity in domain_data[DATA_ENTITIES]:
+            await entity.async_update_album()
 
-    hass.services.async_register(DOMAIN, "select_next_album", select_new_album)
+    hass.services.async_register(DOMAIN, SERVICE_SELECT_NEXT_ALBUM, select_next_album)
 
     return True
-
-
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up album_select from a config entry."""
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    return True
-
-
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

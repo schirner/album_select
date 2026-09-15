@@ -1,0 +1,17 @@
+default_config:
+
+logger:
+  default: warning
+  logs:
+    custom_components.album_select: debug
+    homeassistant.components.media_source: debug
+
+# Stage 2: the Immich integration is added through the UI, and album_select
+# discovers its album node at runtime.
+# Stage 1 (no Immich needed) instead uses the seeded ./dev-media library:
+#   root: "media-source://media_source/local"
+album_select:
+  root: immich
+  interval: 30
+  display_time: 15
+  min_assets: 5

@@ -1,0 +1,5 @@
+select_next_album:
+  name: Select next album
+  description: >-
+    Immediately select a new random album, without waiting for the next
+    rotation interval.

@@ -2,106 +2,165 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 
-The Album Select integration for Home Assistant allows you to randomly select photo albums for display on picture frames or other display devices. It's particularly useful when you want to rotate through different photo albums at set intervals.
+Randomly rotates a photo album for display on a picture frame or wall panel.
 
-## Features
+Albums are discovered by browsing a Home Assistant **media source**, not the
+filesystem. The same code therefore works against an [Immich](https://immich.app/)
+instance, a local media directory, or any other media source whose children are
+album-like containers — selected purely by configuration.
 
-- Randomly selects photo albums from a specified directory
-- Updates at configurable intervals
-- Provides album metadata including year, month, name, and URI
-- Works with albums that follow the naming pattern: `YYYY-MM-AlbumName` or `YYYY_MM_AlbumName`
-- Includes a service to manually select a new album on demand
+## Why media sources rather than files
+
+The original version enumerated directories and handed the panel a signed path
+to the original file. That does not survive a real phone library:
+
+- Phone photos are HEIC, and Chromium has no HEIF decoder for `<img>`, so those
+  files never render in the Home Assistant Companion WebView.
+- 10-bit HEVC video stalls the WebView without firing an `error` event, so a
+  slideshow parks on a white screen with nothing in the log.
+- Some filenames (for example one containing `(1)`) are rejected when signed.
+
+Immich serves JPEG thumbnails and H.264 transcodes addressed by UUID, with no
+filename in the path, which sidesteps all three.
 
 ## Installation
 
-### HACS (Recommended)
+### HACS
 
-1. Make sure [HACS](https://hacs.xyz/) is installed in your Home Assistant instance
-2. Add this repository as a custom repository in HACS:
-   - Go to HACS in your Home Assistant instance
-   - Click on "Integrations"
-   - Click the three dots in the top right corner and select "Custom repositories"
-   - Add the URL of this repository and select "Integration" as the category
-3. Click "Install" on the Album Select integration
-4. Restart Home Assistant
+1. In HACS, add this repository as a custom repository with category
+   **Integration**.
+2. Install **Album Select** and restart Home Assistant.
 
-### Manual Installation
+### Manual
 
-1. Copy the `album_select` directory from this repository to your Home Assistant's `custom_components` directory
-2. Restart Home Assistant
+Copy `custom_components/album_select` into your Home Assistant
+`custom_components` directory and restart.
 
 ## Configuration
 
-Add the following to your `configuration.yaml`:
-
 ```yaml
 album_select:
-  path: "/path/to/your/albums"  # Required: Directory containing album folders
-  interval: 30                  # Optional: Update interval in minutes (default: 30)
-  uri_prefix: "media-source://media_source/local"  # Optional: URI prefix for media access
-  media_prefix: "/media"        # Optional: File system prefix to replace with uri_prefix
+  root: immich          # or a literal media-source:// URI
+  interval: 30          # upper bound on how long one album is shown
+  display_time: 15      # seconds per photo, as configured in WallPanel
+  min_assets: 5         # skip albums with fewer assets than this
+  require_pattern: false
 ```
-
-### Configuration Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `path` | string | `/media/rock2_photo/onedrive` | Path to the directory containing your photo albums |
-| `interval` | integer | 30 | Time interval in minutes between album changes |
-| `uri_prefix` | string | `media-source://media_source/local` | URI prefix used for media access in Home Assistant |
-| `media_prefix` | string | `/media` | File system prefix to be replaced with uri_prefix |
+| `root` | string | `immich` | Where to look for albums. The magic value `immich` discovers the Immich album node at runtime. Any other value is used verbatim as a media-source URI, e.g. `media-source://media_source/local/photos`. |
+| `interval` | integer | `30` | Longest an album may stay on screen, in minutes. |
+| `display_time` | float | `15.0` | Seconds each photo is shown, matching WallPanel's option of the same name. Used to work out when an album runs out of new pictures — see below. `0` disables the calculation, so every album is held for the full `interval`. |
+| `min_assets` | integer | `0` | Exclude albums with fewer than this many assets outright. Different from `display_time`, which only shortens the stay. `0` disables the check. |
+| `require_pattern` | boolean | `false` | When true, only albums named `YYYY-MM-Name` (or `YYYY_MM_Name`) are eligible. |
 
-## Usage
+### How long an album is shown
 
-Once configured, the integration will create a sensor entity called `sensor.album_select` which will randomly select an album at the specified interval.
+An album of 12 photos at 15 seconds each has only three minutes of new
+material; holding it for the full 30 minutes just shows the same pictures
+again and again. So each album is held for:
 
-### Services
-
-The integration provides the following service:
-
-- `album_select.select_next_album`: Selects a new random album immediately, without waiting for the next interval
-
-Example service call:
-```yaml
-service: album_select.select_next_album
+```
+min(interval, asset_count × display_time)
 ```
 
-### Sensor Attributes
+A 12-photo album is shown for 3 minutes, a 200-photo album for the full 30.
+The rotation is therefore scheduled per album rather than on a fixed timer,
+and `sensor.album_select` carries the `asset_count` used for the decision.
 
-The sensor provides the following attributes:
+Note that WallPanel's `media_order` defaults to `random`, not `sorted`. With
+random ordering, pictures start repeating well before the album is exhausted,
+so this is an upper bound on useful time rather than an exact one. Set
+`media_order: sorted` in WallPanel if you want the two to line up precisely.
 
-- `year`: The year of the album (extracted from folder name)
-- `month`: The month of the album (extracted from folder name)
-- `name`: The name of the album (extracted from folder name)
-- `uri`: The URI to access the album in Home Assistant
-- `path`: The local file system path to the album
+### Why `root: immich` is not a URI
 
-### Example Automations
+An Immich album URI embeds the Immich user id, as in
+`media-source://immich/<user-id>|albums|<album-id>`. Hardcoding it would break
+whenever the account behind the integration changes, so the album node is
+located by browsing down from the media source root each time. Only loaded
+Immich config entries are listed there, so an unavailable instance is skipped
+automatically.
 
-You can use this sensor to automatically change the displayed album on a picture frame:
+## Entities
+
+| Entity | State |
+|--------|-------|
+| `sensor.album_select` | The media-source URI of the selected album, verbatim. |
+| `sensor.album_select_name` | A human-readable label for that album. |
+
+The second entity exists because WallPanel's `${entity:<id>}` placeholder
+substitutes entity *state* only, never attributes.
+
+### Attributes on `sensor.album_select`
+
+- `title` — the album's title as the media source reports it
+- `display_name` — `Name · MM/YYYY` when the title matches the naming pattern,
+  otherwise the title unchanged
+- `year`, `month`, `name` — present only when the title matches the pattern
+- `asset_count` — present only when `min_assets` is greater than zero
+- `error` — present instead of the above when selection failed; the state is
+  then `unknown`
+
+## Actions
+
+`album_select.select_next_album` selects a new album immediately, without
+waiting for the next interval.
+
+## Use with WallPanel
 
 ```yaml
-automation:
-  - alias: Update Picture Frame Album
-    trigger:
-      - platform: state
-        entity_id: sensor.album_select
-    action:
-      - service: media_player.play_media
-        target:
-          entity_id: media_player.picture_frame
-        data:
-          media_content_id: "{{ state_attr('sensor.album_select', 'uri') }}"
-          media_content_type: "image/jpeg"
+wallpanel:
+  enabled: true
+  image_url: "${entity:sensor.album_select}"
+  image_info_template: "${entity:sensor.album_select_name}"
 ```
 
-## Troubleshooting
+## Upgrading from 0.0.x
 
-If the sensor shows no state or displays an error, check:
-1. The path exists and is accessible by Home Assistant
-2. The album folders follow the naming convention `YYYY-MM-AlbumName` or `YYYY_MM_AlbumName`
-3. Home Assistant has proper permissions to read the specified directory
+Breaking changes:
+
+- `path`, `uri_prefix` and `media_prefix` are removed. Use `root` instead —
+  either `immich` or a literal `media-source://` URI.
+- The `folder` attribute is removed; it has no meaning without a filesystem
+  path. Use `title`, `display_name` or `asset_count`.
+- Albums no longer need to match `YYYY-MM-Name`. 0.0.x filtered on it
+  implicitly; set `require_pattern: true` to keep that behaviour.
+
+## Development
+
+Unit tests run in Docker and need no Home Assistant instance:
+
+```bash
+docker build -f Dockerfile.test -t album-select-test .
+docker run --rm -v "$PWD":/workspace album-select-test pytest -q
+```
+
+`requirements_test.txt` pins `pytest-homeassistant-custom-component` to a
+release matching a specific Home Assistant version — keep it aligned with the
+instance you are targeting (Settings → About).
+
+### Development instance
+
+`docker-compose.yml` brings up Home Assistant on port 8124, with this
+repository's `custom_components` mounted read-only and `dev-media/` mounted as
+the media directory:
+
+```bash
+docker compose up -d
+docker compose logs -f homeassistant
+```
+
+`dev-media/` holds seeded albums that exercise the options: one ordinary
+album, one below `min_assets`, one using the `YYYY-MM_Name` separator variant,
+and one with no date prefix for `require_pattern`.
+
+To test the Immich path, add the Immich integration through the UI at
+<http://localhost:8124> — pointing at an existing Immich server with a
+read-scoped API key is enough, no separate server is needed — then set
+`root: immich` in `dev-config/configuration.yaml` and restart.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT — see `LICENSE`.

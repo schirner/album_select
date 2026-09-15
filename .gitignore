@@ -38,3 +38,9 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+# Testing
+.pytest_cache/
+
+# Dev instance runtime state (see docker-compose.yml)
+/dev-config/*
+!/dev-config/configuration.yaml

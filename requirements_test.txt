@@ -1,0 +1,3 @@
+# Must match the Home Assistant version of the target instance.
+# 0.13.363 -> homeassistant==2026.9.0 (requires Python 3.14)
+pytest-homeassistant-custom-component==0.13.363
