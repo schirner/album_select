@@ -1,7 +1,7 @@
 """Tests for album_select media-source traversal and album selection."""
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -81,11 +81,24 @@ def immich_tree(albums):
     }
 
 
+_CREATED: list[AlbumSelectSensor] = []
+
+
 def make_sensor(hass, browser, **kwargs):
     """Create a sensor wired to `hass`, with media_source browsing faked."""
     sensor = AlbumSelectSensor(root=kwargs.pop("root", "immich"), **kwargs)
     sensor.hass = hass
+    _CREATED.append(sensor)
     return sensor
+
+
+@pytest.fixture(autouse=True)
+def _cancel_pending_rotations():
+    """Every selection arms a rotation timer; drop it at teardown."""
+    yield
+    for sensor in _CREATED:
+        sensor._handle_remove()
+    _CREATED.clear()
 
 
 def patch_choice_first():
@@ -316,10 +329,10 @@ async def test_overlong_uri_is_rejected(hass: HomeAssistant) -> None:
 
 
 async def test_min_assets_zero_skips_counting(hass: HomeAssistant) -> None:
-    """With the check disabled, albums are never browsed individually."""
+    """With both count consumers disabled, albums are never browsed."""
     picked = album("2026-08-UK", 3)
     browser = Browser(immich_tree([picked]))
-    sensor = make_sensor(hass, browser, min_assets=0)
+    sensor = make_sensor(hass, browser, min_assets=0, display_time=0)
     with patch_browse(browser):
         await sensor.async_update_album()
     assert browser.count(picked.media_content_id) == 0
@@ -413,3 +426,87 @@ async def test_name_sensor_updates_on_next_selection(hass: HomeAssistant) -> Non
         await sensor.async_update_album()
     assert len(fired) == 2
     assert fired[0] != fired[1]
+
+
+# --------------------------------------------------------------------------
+# Hold time
+# --------------------------------------------------------------------------
+
+
+async def test_counts_assets_for_hold_time_alone(hass: HomeAssistant) -> None:
+    """display_time needs the count even when min_assets does not."""
+    picked = album("2026-08-UK", 3)
+    browser = Browser(immich_tree([picked]))
+    sensor = make_sensor(hass, browser, min_assets=0, display_time=15)
+    with patch_browse(browser):
+        await sensor.async_update_album()
+    assert browser.count(picked.media_content_id) == 1
+    assert sensor.extra_state_attributes["asset_count"] == 3
+
+
+@pytest.mark.parametrize(
+    ("count", "display_time", "interval", "expected"),
+    [
+        (12, 15, 30, 180.0),
+        (4, 15, 30, 60.0),
+        (1000, 15, 30, 1800.0),
+        (12, 0, 30, 1800.0),
+    ],
+    ids=["short_album", "tiny_album", "capped_by_interval", "display_time_disabled"],
+)
+async def test_hold_seconds(
+    hass: HomeAssistant, count: int, display_time: float, interval: int, expected: float
+) -> None:
+    """An album is held for its own length, bounded by the interval."""
+    picked = album("2026-08-UK", count)
+    browser = Browser(immich_tree([picked]))
+    sensor = make_sensor(
+        hass, browser, interval=interval, display_time=display_time, min_assets=0
+    )
+    with patch_browse(browser):
+        await sensor.async_update_album()
+    assert sensor.hold_seconds() == expected
+
+
+async def test_failed_selection_holds_for_interval(hass: HomeAssistant) -> None:
+    """With no album there is no count, so fall back to the interval."""
+    browser = Browser(immich_tree([]))
+    sensor = make_sensor(hass, browser, interval=30, display_time=15)
+    with patch_browse(browser):
+        await sensor.async_update_album()
+    assert sensor.state is None
+    assert sensor.hold_seconds() == 1800.0
+
+
+async def test_rotation_is_rescheduled_not_stacked(hass: HomeAssistant) -> None:
+    """Each selection replaces the pending rotation rather than adding one."""
+    browser = Browser(immich_tree([album("2026-08-UK", 3), album("2026-09-DE", 3)]))
+    sensor = make_sensor(hass, browser)
+    unsubs = [MagicMock(name="unsub0"), MagicMock(name="unsub1")]
+    with (
+        patch_browse(browser),
+        patch(
+            "custom_components.album_select.sensor.async_call_later",
+            side_effect=unsubs,
+        ) as call_later,
+    ):
+        await sensor.async_update_album()
+        await sensor.async_update_album()
+
+    assert call_later.call_count == 2
+    # The first timer was cancelled before the second was armed.
+    unsubs[0].assert_called_once_with()
+    unsubs[1].assert_not_called()
+
+
+async def test_removal_stops_rotation(hass: HomeAssistant) -> None:
+    """A selection finishing after removal must not arm a new timer."""
+    browser = Browser(immich_tree([album("2026-08-UK", 3)]))
+    sensor = make_sensor(hass, browser)
+    sensor._handle_remove()
+    with (
+        patch_browse(browser),
+        patch("custom_components.album_select.sensor.async_call_later") as call_later,
+    ):
+        await sensor.async_update_album()
+    call_later.assert_not_called()

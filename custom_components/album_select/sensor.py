@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import random
-from datetime import timedelta
 from typing import Any
 
 from homeassistant.components import media_source
@@ -20,7 +19,7 @@ from homeassistant.components.sensor import (
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
@@ -28,10 +27,12 @@ from .const import (
     ALBUM_REGEX,
     ALBUMS_SUFFIX,
     BASE_SCHEMA,
+    CONF_DISPLAY_TIME,
     CONF_INTERVAL,
     CONF_MIN_ASSETS,
     CONF_REQUIRE_PATTERN,
     CONF_ROOT,
+    DEFAULT_DISPLAY_TIME,
     DEFAULT_INTERVAL,
     DEFAULT_MIN_ASSETS,
     DEFAULT_REQUIRE_PATTERN,
@@ -68,6 +69,7 @@ async def async_setup_platform(
         interval=conf.get(CONF_INTERVAL, DEFAULT_INTERVAL),
         require_pattern=conf.get(CONF_REQUIRE_PATTERN, DEFAULT_REQUIRE_PATTERN),
         min_assets=conf.get(CONF_MIN_ASSETS, DEFAULT_MIN_ASSETS),
+        display_time=conf.get(CONF_DISPLAY_TIME, DEFAULT_DISPLAY_TIME),
     )
     hass.data.setdefault(DOMAIN, {}).setdefault("entities", []).append(sensor)
     async_add_entities([sensor, AlbumNameSensor(sensor)])
@@ -123,12 +125,16 @@ class AlbumSelectSensor(SensorEntity):
         interval: int = DEFAULT_INTERVAL,
         require_pattern: bool = DEFAULT_REQUIRE_PATTERN,
         min_assets: int = DEFAULT_MIN_ASSETS,
+        display_time: float = DEFAULT_DISPLAY_TIME,
     ) -> None:
         """Initialize the album select sensor."""
         self._root = root
         self._interval = interval
         self._require_pattern = require_pattern
         self._min_assets = min_assets
+        self._display_time = display_time
+        self._unsub_timer: CALLBACK_TYPE | None = None
+        self._removed = False
         self._state: str | None = None
         self._attrs: dict[str, Any] = {}
         self._last_uri: str | None = None
@@ -137,21 +143,56 @@ class AlbumSelectSensor(SensorEntity):
         self._attr_name = "Album Select"
 
     async def async_added_to_hass(self) -> None:
-        """Start the rotation timer and make the first selection."""
-        self.async_on_remove(
-            async_track_time_interval(
-                self.hass, self._async_interval_update, timedelta(minutes=self._interval)
-            )
-        )
+        """Make the first selection once Home Assistant is started."""
+        self.async_on_remove(self._handle_remove)
         self.async_on_remove(async_at_started(self.hass, self._async_first_update))
-
-    async def _async_interval_update(self, _now) -> None:
-        """Handle the rotation timer."""
-        await self.async_update_album()
 
     async def _async_first_update(self, _hass: HomeAssistant) -> None:
         """Select once Home Assistant is started, so media sources are loaded."""
         await self.async_update_album()
+
+    async def _async_scheduled_update(self, _now) -> None:
+        """Handle the rotation timer."""
+        await self.async_update_album()
+
+    @callback
+    def _handle_remove(self) -> None:
+        """Stop rotating for good; a selection may still be in flight."""
+        self._removed = True
+        self._cancel_timer()
+
+    @callback
+    def _cancel_timer(self) -> None:
+        """Cancel a pending rotation, if any."""
+        if self._unsub_timer is not None:
+            self._unsub_timer()
+            self._unsub_timer = None
+
+    @callback
+    def hold_seconds(self) -> float:
+        """Return how long the current album should stay on screen.
+
+        An album runs out of new material after asset_count * display_time
+        seconds, so holding it longer than that only repeats pictures. The
+        configured interval remains the upper bound.
+        """
+        interval = self._interval * 60
+        count = self._attrs.get("asset_count")
+        if self._display_time <= 0 or not count:
+            return float(interval)
+        return float(min(interval, count * self._display_time))
+
+    @callback
+    def _schedule_next(self) -> None:
+        """Queue the next rotation, replacing any pending one."""
+        self._cancel_timer()
+        if self.hass is None or self._removed:
+            return
+        delay = self.hold_seconds()
+        _LOGGER.debug("Holding album for %.0f s", delay)
+        self._unsub_timer = async_call_later(
+            self.hass, delay, self._async_scheduled_update
+        )
 
     @property
     def state(self) -> str | None:
@@ -182,6 +223,13 @@ class AlbumSelectSensor(SensorEntity):
             listener()
 
     async def async_update_album(self) -> None:
+        """Pick a new random album and queue the next rotation."""
+        try:
+            await self._async_select_album()
+        finally:
+            self._schedule_next()
+
+    async def _async_select_album(self) -> None:
         """Pick a new random album."""
         root_uri = await async_resolve_root(self.hass, self._root)
         if root_uri is None:
@@ -270,8 +318,8 @@ class AlbumSelectSensor(SensorEntity):
         return albums
 
     async def _async_asset_count(self, album: Any) -> int | None:
-        """Count the assets in an album, or None when the check is disabled."""
-        if self._min_assets <= 0:
+        """Count the assets in an album, or None when nothing needs the count."""
+        if self._min_assets <= 0 and self._display_time <= 0:
             return None
         listing = await _async_browse(self.hass, str(album.media_content_id))
         if listing is None:

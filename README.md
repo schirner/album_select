@@ -41,7 +41,8 @@ Copy `custom_components/album_select` into your Home Assistant
 ```yaml
 album_select:
   root: immich          # or a literal media-source:// URI
-  interval: 30          # minutes between albums
+  interval: 30          # upper bound on how long one album is shown
+  display_time: 15      # seconds per photo, as configured in WallPanel
   min_assets: 5         # skip albums with fewer assets than this
   require_pattern: false
 ```
@@ -49,9 +50,29 @@ album_select:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `root` | string | `immich` | Where to look for albums. The magic value `immich` discovers the Immich album node at runtime. Any other value is used verbatim as a media-source URI, e.g. `media-source://media_source/local/photos`. |
-| `interval` | integer | `30` | Minutes between album changes. |
-| `min_assets` | integer | `0` | Skip albums with fewer than this many assets, so the frame does not sit on a two-photo album. `0` disables the check and avoids a browse per candidate. |
+| `interval` | integer | `30` | Longest an album may stay on screen, in minutes. |
+| `display_time` | float | `15.0` | Seconds each photo is shown, matching WallPanel's option of the same name. Used to work out when an album runs out of new pictures — see below. `0` disables the calculation, so every album is held for the full `interval`. |
+| `min_assets` | integer | `0` | Exclude albums with fewer than this many assets outright. Different from `display_time`, which only shortens the stay. `0` disables the check. |
 | `require_pattern` | boolean | `false` | When true, only albums named `YYYY-MM-Name` (or `YYYY_MM_Name`) are eligible. |
+
+### How long an album is shown
+
+An album of 12 photos at 15 seconds each has only three minutes of new
+material; holding it for the full 30 minutes just shows the same pictures
+again and again. So each album is held for:
+
+```
+min(interval, asset_count × display_time)
+```
+
+A 12-photo album is shown for 3 minutes, a 200-photo album for the full 30.
+The rotation is therefore scheduled per album rather than on a fixed timer,
+and `sensor.album_select` carries the `asset_count` used for the decision.
+
+Note that WallPanel's `media_order` defaults to `random`, not `sorted`. With
+random ordering, pictures start repeating well before the album is exhausted,
+so this is an upper bound on useful time rather than an exact one. Set
+`media_order: sorted` in WallPanel if you want the two to line up precisely.
 
 ### Why `root: immich` is not a URI
 

@@ -12,5 +12,6 @@ logger:
 #   root: "media-source://media_source/local"
 album_select:
   root: immich
-  interval: 5
+  interval: 30
+  display_time: 15
   min_assets: 5
