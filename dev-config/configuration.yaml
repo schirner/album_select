@@ -6,10 +6,11 @@ logger:
     custom_components.album_select: debug
     homeassistant.components.media_source: debug
 
-# Albums live in ./dev-media, mounted at the default /media dir, so they are
-# reachable as media-source://media_source/local/<album>.
-# For stage 2, add the Immich integration through the UI and set: root: immich
+# Stage 2: the Immich integration is added through the UI, and album_select
+# discovers its album node at runtime.
+# Stage 1 (no Immich needed) instead uses the seeded ./dev-media library:
+#   root: "media-source://media_source/local"
 album_select:
-  root: "media-source://media_source/local"
+  root: immich
   interval: 5
-  min_assets: 3
+  min_assets: 5
