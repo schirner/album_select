@@ -120,6 +120,26 @@ docker run --rm -v "$PWD":/workspace album-select-test pytest -q
 release matching a specific Home Assistant version — keep it aligned with the
 instance you are targeting (Settings → About).
 
+### Development instance
+
+`docker-compose.yml` brings up Home Assistant on port 8124, with this
+repository's `custom_components` mounted read-only and `dev-media/` mounted as
+the media directory:
+
+```bash
+docker compose up -d
+docker compose logs -f homeassistant
+```
+
+`dev-media/` holds seeded albums that exercise the options: one ordinary
+album, one below `min_assets`, one using the `YYYY-MM_Name` separator variant,
+and one with no date prefix for `require_pattern`.
+
+To test the Immich path, add the Immich integration through the UI at
+<http://localhost:8124> — pointing at an existing Immich server with a
+read-scoped API key is enough, no separate server is needed — then set
+`root: immich` in `dev-config/configuration.yaml` and restart.
+
 ## License
 
 MIT — see `LICENSE`.

@@ -1,0 +1,14 @@
+# Development instance for testing album_select against a real Home Assistant.
+# Port 8124 so it cannot collide with the live instance on the LAN.
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:2026.9.0
+    container_name: album-select-dev
+    volumes:
+      - ./dev-config:/config
+      - ./custom_components:/config/custom_components:ro
+      - ./dev-media:/media:ro
+    ports:
+      - "8124:8123"
+    environment:
+      - TZ=America/New_York
